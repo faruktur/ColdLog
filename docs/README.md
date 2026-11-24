@@ -1,0 +1,53 @@
+# FleetStream — Dokümantasyon Düzeni
+
+Bu klasör, FleetStream'in **nasıl tasarlandığını** değil sadece **ne olduğunu** değil, hangi sayıya ve hangi gerekçeye dayanarak o hâle geldiğini kaydeder. Amaç, her mimari kararın sonradan savunulabilir olması.
+
+## Klasör düzeni
+
+Klasörler peşin açılmaz, sırası gelince açılır.
+
+| Klasör | İçerik | Durum |
+|---|---|---|
+| `01-project-info/` | Proje özeti, glossary (ubiquitous language) | Başlandı |
+| `02-requirements/` | Fonksiyonel gereksinimler, sayısal NFR/SLO tablosu, out-of-scope | Sırada (Adım 1) |
+| `03-capacity/` | BOTE kapasite modeli, varsayımlar ve kaynakları | Adım 2 |
+| `04-design/` | High-level design, zaman ve durum modeli | Adım 3 |
+| `05-adr/` | Architecture Decision Records | Sürekli |
+| `06-c4/` | C4 diyagramları (Context → Container → Component) | Adım 5 |
+| `08-validation/` | Load test planı, BOTE tahmini vs ölçülen sonuç | Adım 7 |
+
+## Çalışma kuralları
+
+**1. Hipotez ile karar farklıdır.**
+`01-project-info/project-summary.md` içindeki teknoloji tablosu bir **hipotez listesidir**, karar değil. Bir teknoloji ancak kendi ADR'si yazıldığında karar hâline gelir. Hipotez olanlar `TBD` veya *(hipotez)* ile işaretlenir.
+
+**2. Her mimari karar bir ADR'dir.**
+Geri dönüşü maliyetli olan her seçim `05-adr/` altına yazılır. Şablon: [`05-adr/template.md`](05-adr/template.md). Numaralar artar, ADR'ler silinmez — yanlış çıkan ADR'nin durumu *Değiştirildi* olur ve yerine geçen ADR'ye atıf verilir.
+
+**3. Her sayının kaynağı yazılır.**
+Dokümanda geçen hiçbir sayı kaynaksız duramaz. Kaynak türü üç tanedir ve açıkça belirtilir:
+- **Varsayım** — biz seçtik, gerekçesi yazılır (`03-capacity/assumptions.md`)
+- **Türetilmiş** — başka sayılardan hesaplandı, formülü yazılır
+- **Ölçülmüş** — load test veya gerçek sistemden geldi, nasıl ölçüldüğü yazılır
+
+**4. Doküman dili.**
+Anlatım Türkçe, teknik terimler İngilizce (`event-time`, `back-pressure`, `partition`, `idempotency`). Terim çevrilmez; glossary'de karşılığı açıklanır.
+
+**5. Tasarım kodu beklemez, kod tasarımı bekler.**
+Bir dikey kesit implementasyonuna, o kesitin HLD'si ve ilgili ADR'leri yazılmadan başlanmaz.
+
+## İlerleme sırası
+
+```
+0. Çalışma düzeni        → bu doküman + ADR şablonu + glossary
+1. Gereksinimler + SLO   → BOTE'nin girdisi
+2. BOTE / kapasite       → teknoloji kararlarının dayanağı
+3. HLD                   → teknolojiden bağımsız şekil
+4. Teknoloji ADR'leri    → TBD'lerin kapatılması
+5. C4                    → seçilen kesit için component seviyesi
+6. Dikey kesit kodu      → observability + test + CI + k8s
+7. Load test             → tahmin vs gerçek, döngünün kapanması
+```
+
+**Sabitlenen çıpalar:** 100.000 varlık × 1 mesaj/5 saniye → ~20.000 event/sn ortalama.
+**İlk dikey kesit:** telemetri ingest → stream processing → asset state → kural tabanlı uyarı.
