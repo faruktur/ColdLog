@@ -10,7 +10,7 @@ Klasörler peşin açılmaz, sırası gelince açılır.
 |---|---|---|
 | `01-project-info/` | Proje özeti, glossary (ubiquitous language) | Başlandı |
 | `02-requirements/` | Fonksiyonel gereksinimler, sayısal NFR/SLO tablosu, out-of-scope | Yazıldı (Adım 1) |
-| `03-capacity/` | BOTE kapasite modeli, varsayımlar ve kaynakları | Adım 2 |
+| `03-capacity/` | BOTE kapasite modeli, varsayımlar ve kaynakları | Yazıldı (Adım 2) |
 | `04-design/` | High-level design, zaman ve durum modeli | Adım 3 |
 | `05-adr/` | Architecture Decision Records | Sürekli |
 | `06-c4/` | C4 diyagramları (Context → Container → Component) | Adım 5 |
@@ -21,8 +21,12 @@ Klasörler peşin açılmaz, sırası gelince açılır.
 **1. Hipotez ile karar farklıdır.**
 `01-project-info/project-summary.md` içindeki teknoloji tablosu bir **hipotez listesidir**, karar değil. Bir teknoloji ancak kendi ADR'si yazıldığında karar hâline gelir. Hipotez olanlar `TBD` veya *(hipotez)* ile işaretlenir.
 
+> **Kapanmayan `TBD` bir eksik değildir.** Analytics Database satırı bilinçli olarak `TBD` kalıyor: FR-19 (90 güne kadar agregasyon) kaç Asset üzerinden agregasyon yapılacağını söylemiyor ve tek Asset ile filo geneli arasında ~100.000× fark var. Karar verecek sayı yokken ADR yazmak, kararı hesaba değil tahmine dayandırmak olur. Bu satır, FR-19 netleştiğinde kapanır.
+
 **2. Her mimari karar bir ADR'dir.**
 Geri dönüşü maliyetli olan her seçim `05-adr/` altına yazılır. Şablon: [`05-adr/template.md`](05-adr/template.md). Numaralar artar, ADR'ler silinmez — yanlış çıkan ADR'nin durumu *Değiştirildi* olur ve yerine geçen ADR'ye atıf verilir.
+
+Her ADR aynı zamanda [`05-adr/karar-haritasi.md`](05-adr/karar-haritasi.md) tablosuna bir satır ekler: kararın dayandığı SLO, BOTE satırı, SLI ve metrik adı. **Satırı olmayan ADR eksik ADR'dir.** O tablonun son iki kolonu (tahmin / ölçülen) Adım 7'de dolar ve döngüyü kapatır.
 
 **3. Her sayının kaynağı yazılır.**
 Dokümanda geçen hiçbir sayı kaynaksız duramaz. Kaynak türü üç tanedir ve açıkça belirtilir:

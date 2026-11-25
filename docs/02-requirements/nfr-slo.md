@@ -65,12 +65,45 @@ Bu doküman BOTE'nin (Adım 2) **tek girdi kaynağıdır**. Buradaki her sayı `
 | C-02 | Tenancy | Tek tenant; `tenantId` şemada ve partition key tasarımında rezerve | Varsayım: izolasyon ve auth kapsam dışı, ama sonradan eklemek tam repartition + veri göçü demek. Bedava alınabilen tek-yönlü kapı önlemi. |
 | C-03 | Asset ↔ Device ilişkisi | 1:1 | Varsayım: çoklu device (çekici + dorse) ilk kesitte gereksiz karmaşıklık |
 
-## Açık kalan ve BOTE'den sonra netleşecek sayılar
+## 7. SLI tanımları — SLO'ların nasıl ölçüleceği
 
-| Konu | Neden şimdi karar verilmiyor |
-|---|---|
-| Tepe faktörü (S-05) | Recovery burst senaryosuyla birlikte Adım 2'de modellenecek |
-| Reading payload boyutu | Serialization formatı (JSON / Protobuf) kararına bağlı — BOTE'de her ikisi hesaplanıp karşılaştırılacak |
-| Kafka partition sayısı | Türetilmiş olacak: ingest hızı, partition başına throughput ve consumer paralelliğinden |
-| Beklenen Alert hacmi | Kural eşiklerine bağlı; Adım 2'de senaryo bazlı tahmin edilecek |
-| Node/instance sayıları ve maliyet | Adım 2 çıktısı |
+Bir SLO, SLI'ı yazılmadan **ölçülemez bir niyettir**. Her satır kodun hangi iki zaman damgasını kaydedeceğini söylüyor; Adım 6'da enstrümantasyon doğrudan bu tablodan yazılacak.
+
+| # | Hangi SLO | Ölçülen | Olay kümesi (hangi istekler sayılır) | Pencere | Metrik adı |
+|---|---|---|---|---|---|
+| **SLI-01** | L-01 | `alert.created_at − reading.event_time` | **Yalnızca** `ingest_time − event_time < 60 sn` olan Reading'ler | p99, 5 dk'lık kovalar; uyum penceresi 30 gün | `fleetstream_alert_latency_seconds` (histogram) |
+| **SLI-02** | A-01 | 1 sn içinde 2xx dönen ingest isteği oranı | Tüm ingest istekleri; **4xx hariç** (geçersiz payload sunucunun hatası değil) | 30 gün | `fleetstream_ingest_requests_total{outcome}` |
+| **SLI-03** | L-02 | Canlı Asset durumu endpoint'inin yanıt süresi | Tüm başarılı sorgular | p95, 5 dk'lık kovalar | `fleetstream_query_duration_seconds{endpoint="asset-state"}` |
+| **SLI-04** | A-03 | **Canary Asset'in** son Alert'inin yaşı | Sürekli ihlal üreten 1 sentetik Asset | Sürekli; ihlal = yaş > 60 sn | `fleetstream_canary_alert_age_seconds` |
+
+### SLI-01'in filtresi neden zorunlu
+
+`03-capacity/bote-model.md` §2.8: kesinti sonrası recovery sırasında işlenen Reading'lerin `event_time`'ı saatler öncesine ait. Bu veriyi SLI-01'e dahil ederseniz **her kesinti SLO'yu otomatik ihlal eder ve error budget bir anda tükenir** — hâlbuki sistem D-03'ün gerektirdiği gibi davranmıştır. 60 sn eşiği, "cihaz zamanında gönderdi" ile "cihaz buffer'dan boşaltıyor" ayrımının pratik sınırı.
+
+**Bedeli:** bu filtre, geç veri yolunun (B-03) gecikmesini hiçbir SLO'nun ölçmemesi anlamına geliyor. Faz 2'de ayrı bir SLO gerekecek; şimdilik bilinçli boşluk.
+
+### SLI-04 neden consumer lag değil
+
+Consumer lag sıfır olduğu hâlde alarm üretilmiyor olabilir: kural motoru çökmüş, kural tablosu boş gelmiş, veya tüm event'ler sessizce `invalid` sayılıp atılmış olabilir. Lag bu üç durumda da **sağlıklı** görünür. **A-03'ün gerçek riski sessiz başarısızlıktır**, o yüzden ölçüm uçtan uca olmak zorunda: sürekli ihlal üreten sahte bir Asset, ve onun Alert'inin bayatlama süresi. Bu aynı zamanda ADR'lerin "erken uyarı sinyali" alanının ilk gerçek örneği.
+
+## 8. BOTE'de kapanan sayılar
+
+Adım 2 çıktısı: `03-capacity/bote-model.md`
+
+| Konu | Değer | Nerede |
+|---|---|---|
+| Tepe faktörü (S-05) | **×2** (yakalama süresi ≈ kesinti süresi) | §2.8, B-06 |
+| Reading payload boyutu | **~200 B JSON** (~50 B Protobuf; fark hiçbir darboğazı açmıyor) | §2.1–2.2, B-05 |
+| Kafka partition sayısı | **48**, RF 3, 7 gün retention, key `tenantId:assetId` | §2.3, B-04 |
+| Beklenen Alert hacmi | **~0,03 Alert/sn** — ingest'in 5 mertebe altında | §2.11, B-09 |
+| Node/instance sayısı | **~10 node × 8 vCPU** | §3 |
+| Maliyet | **Hesaplanmadı — kapsam dışı** (gelir amacı yok, maliyet karar sürücüsü değil) | §4 |
+
+### BOTE'nin bu dosyaya geri döndürdüğü iki kısıt
+
+| # | Kısıt | Sebep |
+|---|---|---|
+| C-01 revizyonu | Kural modeli **"eşik + sürekli süre"** ile sınırlı; ortalama/pencere tabanlı kural kapsam dışı | State 25 MB ile 346 GB arasında 14.000× fark yapıyor (§2.4) |
+| D-03/D-04 sonucu | Geç veri **ayrı bir consumer**'dan, log yeniden okunarak işlenir | Canlı state geriye dönük streak bilgisini tutmuyor (§2.5) |
+
+> Bu iki satır Adım 3'ün (HLD) gündemidir. Özellikle ikincisi, FR-12 (dedup) ile FR-13 (geriye dönük Alert) arasındaki çatışmanın çözüleceği yer.
