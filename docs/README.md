@@ -9,7 +9,7 @@ Klasörler peşin açılmaz, sırası gelince açılır.
 | Klasör | İçerik | Durum |
 |---|---|---|
 | `01-project-info/` | Proje özeti, glossary (ubiquitous language) | Başlandı |
-| `02-requirements/` | Fonksiyonel gereksinimler, sayısal NFR/SLO tablosu, out-of-scope | Sırada (Adım 1) |
+| `02-requirements/` | Fonksiyonel gereksinimler, sayısal NFR/SLO tablosu, out-of-scope | Yazıldı (Adım 1) |
 | `03-capacity/` | BOTE kapasite modeli, varsayımlar ve kaynakları | Adım 2 |
 | `04-design/` | High-level design, zaman ve durum modeli | Adım 3 |
 | `05-adr/` | Architecture Decision Records | Sürekli |
