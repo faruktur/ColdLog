@@ -2,6 +2,7 @@
 
 **Girdi:** `02-requirements/nfr-slo.md` (tek kaynak). Buradaki hiçbir sayı o dosyadaki bir satıra dayanmadan üretilmemiştir.
 **Yöntem:** Tek anlamlı basamak. Amaç doğru sayıyı bulmak değil, **doğru mertebeyi bulup kararı zorlayan satırı tespit etmek**.
+**Hesap makinesi:** [`bote.py`](bote.py) — bu dosyadaki tüm sayıları üretir. `python bote.py` raporu basar, `python bote.py --test` buradaki sayıların modelden çıktığını doğrular. Girdileri değiştirip sonucu görmek için o dosya kullanılır; **gerekçeler burada, aritmetik orada.**
 
 ---
 
@@ -117,25 +118,75 @@ partition key = tenantId:assetId   → C-02'nin tek yönlü kapı önlemi burada
 
 ### 2.4 Stream processing state boyutu — modelin kırıldığı yer
 
-Üç farklı kural modeli, üç farklı mertebe:
+**State nedir ve neden boyutu önemli:** stream processor event'leri tek tek, sonsuz bir akıştan okur. Event başına veritabanı sorgusu yapamaz (20.000/sn'de imkânsız). "8 °C üzerinde **2 dakika sürekli**" gibi bir kuralı ise tek bir event cevaplayamaz — processor event'ler arasında bir şey **hatırlamak** zorundadır. O hatırladığı şeye `state` denir, RAM'de durur, ve **key başına** (burada `assetId`) tutulur. Yani Asset başına ne tutarsanız **100.000 ile çarpılır.**
 
-| Kural modeli | State içeriği | Hesap | Boyut |
+İki farklı kural şekli, iki farklı mertebe:
+
+| Kural şekli | State'te ne durur | Hesap | Boyut |
 |---|---|---|---|
-| **(a) Eşik + sürekli süre** | Asset+kural başına streak başlangıç zamanı + ihlal bayrağı (~16 B) | 100K × 7 × 16 B + 100K × 100 B (son bilinen durum) | **~25 MB** |
-| (b) 10 dk pencere ortalaması (ham veri tutarak) | Pencere içindeki tüm Reading'ler | 120 reading × 200 B × 100K | **~2,4 GB** |
-| (c) 24 saat pencere (D-03'ü state'te karşılamak) | 24 saatlik tüm Reading'ler | 17.280 × 200 B × 100K | **~346 GB** |
+| **(a) Eşik + sürekli süre**<br>*"8 °C üstü, 2 dk sürekli"* | Asset+kural başına: streak'in **başlangıç zamanı** (8 B) + tetiklendi bayrağı → 16 B. Ayrıca Asset başına son bilinen durum (100 B). | `100K × 7 × 16 B + 100K × 100 B` | **~25 MB** |
+| (b) Pencere ortalaması (ham veri)<br>*"son 10 dk ortalaması > 8 °C"* | Pencere içindeki **tüm Reading'ler** | `(600/5) × 200 B × 100K` | **~2,9 GB** |
+| (b′) Aynı kural, kovalanmış | Kova başına `sum+count` (16 B), 60 sn'lik 10 kova | `10 × 16 B × 7 × 100K` | **~134 MB** |
 
-**BOTE'nin en önemli çıktısı bu tablo.** (a) ile (c) arasında **14.000×** fark var ve bu iki farklı mimari demek: (a) bellekte durur, (c) disk-backed state store ve ayrı bir operasyonel sistem demek.
+**(a) ile (b) arasındaki fark bir optimizasyon değil, cins farkı:**
 
-Karar: **C-01'in kural modeli "eşik + sürekli süre" ile sınırlandırılıyor.** "Son 10 dakikanın ortalaması" tipi kurallar kapsam dışı. Bedeli yazıyoruz: kapı açılıp kapandığında oluşan kısa sıçrama, ortalama tabanlı bir kuralda yutulurdu; eşik+süre modelinde bunu duration penceresinin (2 dk) filtrelemesi gerekiyor.
+```
+(a)  state'te SONUÇ durur      →  boyut = O(asset × kural)
+(b)  state'te VERİ durur       →  boyut = O(asset × pencere_süresi / örnekleme_sıklığı)
+```
+
+(a)'da örnekleme sıklığını 5 sn'den 50 ms'ye çıkarsan da, pencereyi 2 dk'dan 2 güne çıkarsan da **state aynı 16 byte kalır** — çünkü sakladığın şey veri değil, "bu streak şu an ne zaman başladı" bilgisi. Yeni event gelince:
+
+```
+if reading.temp > 8:
+    if streak_start is None: streak_start = reading.event_time      # streak başladı
+    elif reading.event_time - streak_start >= 2dk and not fired:
+        emit Violation; fired = True
+else:
+    streak_start = None; fired = False                               # streak kırıldı, sıfırla
+```
+
+(b)'de ise ortalamayı güncellemek için **pencereden çıkan okumanın değerini bilmek şart** (ortalamadan çıkarmak için). O yüzden ham okumaları tutmak zorundasın, ve state hem örnekleme sıklığıyla hem pencere süresiyle **doğru orantılı büyür**.
+
+(b′) satırı dürüstlük payı: (b) 2,9 GB olmak zorunda değil — kovalayarak 134 MB'a indirilebilir, karşılığında pencerenin kenarı 60 sn hassasiyete düşer. Yani (b) **imkânsız değil, pahalı ve daha karmaşık.**
+
+#### Karar ve nedenselliğin yönü
+
+> **Dikkat: (b) ve (b′)'yi eleyen şey C-01 değil.** C-01 kural *sayısını* ve *kapsamını* söylüyor (Asset Type bazında ~5-10 global kural), şeklini söylemiyor. Nedensellik ters yönde işledi: **BOTE state hesabını yaptı, sonuç C-01'e yeni bir kısıt olarak geri yazıldı.** Hesap olmadan C-01 bu kısıtı üretemezdi — zaten BOTE'nin varlık sebebi bu.
+
+Karar (**B-02**): **C-01, kural şekli olarak "eşik + sürekli süre" ile sınırlandırılıyor.** Gerekçe: ilk dikey kesit için 25 MB'lık state tek bir process'in belleğinde durur, snapshot'ı ucuzdur, çökme sonrası yeniden kurulması saniyeler alır. (b) seçilse state yönetimi tek başına bir alt proje olurdu — ki slice 1'in amacı o değil.
+
+Bedeli yazıyoruz: kapı açılıp kapandığında oluşan kısa sıcaklık sıçraması, ortalama tabanlı bir kuralda yutulurdu. Eşik+süre modelinde bu gürültüyü **duration penceresinin (2 dk) filtrelemesi** gerekiyor — yani pencere, (b)'nin yapacağı işi kabaca yapan tek mekanizma hâline geliyor.
 
 ### 2.5 Geç gelen veri nereden işlenir — §2.4'ün zorunlu sonucu
 
 (a) modelinde state yalnızca "şu anki streak"i biliyor. 6 saat önceye ait bir Reading geldiğinde o anın streak'i artık state'te yok — **canlı state üzerinden geriye dönük değerlendirme matematiksel olarak imkânsız.**
 
+#### (c) Bu sorunu state ile çözmeye kalkarsak
+
+D-03 geç veriyi **24 saate** kadar kabul ediyor. Herhangi bir anın durumunu yeniden kurabilmek için, son 24 saatin **tüm Reading'lerini** Asset başına state'te tutmak gerekir:
+
+```
+24 saat / 5 sn = 17.280 Reading/Asset
+17.280 × 200 B = ~3,5 MB/Asset
+× 100.000 Asset × 1,2 overhead = ~415 GB
+```
+
+**346 → 415 GB'ı üreten şey bir kuralın penceresi değil, geç veri toleransının penceresi.** (a) ile arasında **~16.000×** fark var ve bu iki ayrı mimari demek:
+
+| | (a) 25 MB | (c) 415 GB |
+|---|---|---|
+| Nerede durur | process belleği | disk-backed state store (RocksDB tarzı) |
+| Event başına | bellek erişimi | **disk IO** |
+| Çökme sonrası toparlanma | saniyeler | 415 GB'ın geri yüklenmesi |
+| Operasyonel yük | yok | yeni bir sistemin bakımı |
+
+**Ve en belirleyicisi: bu veri zaten Kafka'da duruyor** (7 gün retention, 3 broker'da ~7 TB). (c) seçmek, aynı veriyi ikinci kez saklamak demek.
+
 ```
 sonuç: FR-13 (geriye dönük Alert) canlı consumer'dan karşılanamaz
        → ayrı bir "late data reprocessing" consumer'ı log'u ilgili offset'ten yeniden okur
+       → bellek yerine CPU ödenir, ve yalnızca geç veri geldiğinde (nadir)
        → Kafka retention'ın 7 gün olmasının ikinci gerekçesi bu
 ```
 
@@ -162,25 +213,56 @@ eşzamanlı bağlantı = 100.000         (C-03: Asset ↔ Device 1:1, cihaz baş
 pod kapasitesi (tutucu) = 5.000 req/sn
 ortalama  → 4 pod
 tepe ×2   → 8 pod
-N+1       → 10 pod       (pod başına ~10.000 eşzamanlı bağlantı)
+N+1       → 9 pod        (pod başına ~11.000 eşzamanlı bağlantı)
 ```
 
-**Kesinti sonrası TLS handshake fırtınası:** 100.000 cihaz aynı anda yeniden bağlanırsa, pod başına ~2.000 handshake/sn kapasitesiyle `100.000 / (10 × 2.000) ≈ 5 sn`. Kabul edilebilir — **ama yalnızca cihazlar jitter'lı yeniden bağlanıyorsa.** Jitter yoksa ilk saniyede 100.000 handshake gelir ve kabul edilen istek hızı sıfıra düşer. B-07 kararının ilk gerekçesi bu.
+**Kesinti sonrası TLS handshake fırtınası:** 100.000 cihaz aynı anda yeniden bağlanırsa, pod başına ~2.000 handshake/sn kapasitesiyle `100.000 / (9 × 2.000) ≈ 6 sn`. Kabul edilebilir — **ama yalnızca cihazlar jitter'lı yeniden bağlanıyorsa.** Jitter yoksa ilk saniyede 100.000 handshake gelir ve kabul edilen istek hızı sıfıra düşer. B-07 kararının ilk gerekçesi bu.
 
-### 2.8 Recovery burst — S-05 = ×2 ne demek
+### 2.8 Recovery burst — "×2 ile yakalama" ne demek
+
+**Kilit gözlem: veri üretimi hiç durmaz.** Ingest kesintiye girdiğinde kamyonlar yolda, sensörler ölçmeye devam ediyor; **20.000 event/sn üretilmeye devam ediyor.** Fark şu ki artık cihazların buffer'ına yazılıyor (D-03).
+
+Kesinti bittiğinde cihazlar iki şeyi birlikte göndermek ister: **birikmiş backlog + o an üretilmeye devam eden yeni veri.** Yani kapasitenin bir kısmı zaten yeni veriye gidiyor; backlog'u eritmeye sadece **taban hızın üzerinde kalan fazla** kullanılabilir:
 
 ```
-kesinti süresi × 20.000 event/sn = birikmiş backlog
-tepe faktörü ×2 → fazladan 20.000 event/sn drenaj kapasitesi
-→ yakalama süresi ≈ kesinti süresi
+backlog              = kesinti_süresi × 20.000
+drenaj kapasitesi    = kapasite − 20.000            (taban hızın ÜZERİNDEKİ fazla)
+                     = 20.000 × (tepe − 1)
+
+yakalama süresi      = backlog / drenaj
+                     = kesinti_süresi / (tepe − 1)        ← tüm mesele bu formül
 ```
 
-| Kesinti | Backlog | ×2 ile yakalama | ×4 ile yakalama |
-|---|---|---|---|
-| 43 dk (A-01 aylık bütçe) | ~52 milyon event | 43 dk | ~14 dk |
-| 24 saat (D-03 en kötü hâli) | ~1,73 milyar event | **24 saat** | ~8 saat |
+"Yakalama" (catch-up) = **consumer lag'in yeniden ~0'a dönmesi**, yani sistemin tekrar *şu anki* veriyi işlemeye başlaması.
 
-*(×4'te taban hızın üzerindeki fazla kapasite 3× olduğu için yakalama süresi kesinti/3'tür.)*
+| Tepe faktörü | Fazla kapasite | Yakalama süresi | 24 saat kesinti için | Ingest pod |
+|---|---|---|---|---|
+| ×1,1 | 0,1× | kesinti × 10 | **10 gün** | 6 |
+| ×1,5 | 0,5× | kesinti × 2 | 2 gün | 7 |
+| **×2** | 1× | **kesinti × 1** | **24 saat** | **9** |
+| ×3 | 2× | kesinti / 2 | 12 saat | 13 |
+| ×4 | 3× | kesinti / 3 | 8 saat | 17 |
+
+**Tuzak ×1,1 satırında:** "%10 headroom bıraktım" diyen bir sistemde 1 saatlik kesinti **10 saat** sürer. Tepe faktörü bir konfor payı değil, **toparlanma hızının kendisi.**
+
+Karar: **S-05 = ×2.** Bedeli açıkça kabul ediyoruz: *bir günlük kesintinin telafisi bir gün sürer.*
+
+#### Yakalama süresi boyunca ne oluyor
+
+Bu, kapasite hesabının sadece bir sayı olmadığı yer:
+
+1. **L-01 ihlal ediliyor** — işlenen veri saatler öncesine ait. Süre boyunca SLO tutmaz. (SLI-01'in filtresinin tek sebebi bu.)
+2. **Alert'ler geriye dönük geliyor** — 20 saat önceki bir sıcaklık ihlalinin alarmı şimdi düşüyor. Referans senaryodaki 15 dakikalık bütçe çoktan geçmiş; **ilaç partisi zaten kaybedilmiş.** Yani 24 saatlik bir kesintide ×2 ile toparlanmak "veri kaybı yok" demek, "iş kaybı yok" demek değil.
+3. **Buffer sınırı sert bir duvar** — D-03 cihaz buffer'ını 24 saate bağlıyor. Kesinti 24 saati geçerse veri **gerçekten kaybolur**, tepe faktörü ne olursa olsun.
+
+#### Hangi katmanda ×2 gerekli
+
+| Katman | ×2 neden gerekli | Gecikse ne olur |
+|---|---|---|
+| Ingest API | Veriyi cihazların buffer'ından **almak** için | Buffer dolar → 24 saatlik duvara yaklaşılır → **veri kaybı** |
+| Stream processor | Alarmların zamanında üretilmesi için | Backlog Kafka'da bekler → **gecikme**, kayıp değil |
+
+**Kafka burst'ü yutuyor**, yani iki katmanın tepe faktörü aynı olmak zorunda değil: ingest'teki ×2 bir *dayanıklılık* kararı, stream processor'daki ×2 bir *gecikme* kararı. Slice 1'de ikisine de ×2 veriyoruz; ayrıştırmak Faz 2'nin optimizasyonu.
 
 Karar: **S-05 = ×2.** Bedeli açıkça kabul ediyoruz: *bir günlük kesintinin telafisi bir gün sürer.*
 
@@ -227,7 +309,7 @@ Dedup (D-05) olmasaydı: 10 dakikalık bir ihlal, 5 saniyede bir Alert → ihlal
 | # | Karar | Dayanak |
 |---|---|---|
 | B-01 | L-01 = p99 ≤ 5 sn | §1.2 — 3 dk domain bütçesi / 36× bozulma payı |
-| B-02 | Kural modeli **eşik + sürekli süre** ile sınırlı | §2.4 — 25 MB vs 346 GB state |
+| B-02 | Kural modeli **eşik + sürekli süre** ile sınırlı | §2.4 — state 25 MB vs 2,9 GB (pencere kuralı) |
 | B-03 | Late-data path, hot path'ten **ayrı consumer** | §2.5 — (a) modelinde geriye dönük hesap imkânsız |
 | B-04 | Kafka: **48 partition**, RF 3, 7 gün retention, key `tenantId:assetId` | §2.3 |
 | B-05 | Serialization: **JSON** (slice 1) | §2.2 — 4× tasarruf hiçbir darboğazı açmıyor; en az kodla çalışan seçenek |
@@ -241,7 +323,7 @@ Dedup (D-05) olmasaydı: 10 dakikalık bir ihlal, 5 saniyede bir Alert → ihlal
 
 | Bileşen | Adet / boyut |
 |---|---|
-| Ingest API pod | 10 × (2 vCPU, 1 GB) |
+| Ingest API pod | 9 × (2 vCPU, 1 GB) |
 | Stream processor | 4 instance × 2 vCPU *(hesap 1 instance'ı gerektiriyor; 4, partition paralelliği ve arıza toleransı için)* |
 | Kafka broker | 3 × (4 vCPU, ~2,5 TB disk) |
 | Redis | 1 primary + 1 replica, 1 GB |

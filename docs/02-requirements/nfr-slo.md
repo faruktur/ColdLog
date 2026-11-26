@@ -103,7 +103,7 @@ Adım 2 çıktısı: `03-capacity/bote-model.md`
 
 | # | Kısıt | Sebep |
 |---|---|---|
-| C-01 revizyonu | Kural modeli **"eşik + sürekli süre"** ile sınırlı; ortalama/pencere tabanlı kural kapsam dışı | State 25 MB ile 346 GB arasında 14.000× fark yapıyor (§2.4) |
+| C-01 revizyonu | Kural modeli **"eşik + sürekli süre"** ile sınırlı; ortalama/pencere tabanlı kural kapsam dışı | State'te sonuç saklamak 25 MB, ham veri saklamak 2,9 GB (§2.4) |
 | D-03/D-04 sonucu | Geç veri **ayrı bir consumer**'dan, log yeniden okunarak işlenir | Canlı state geriye dönük streak bilgisini tutmuyor (§2.5) |
 
 > Bu iki satır Adım 3'ün (HLD) gündemidir. Özellikle ikincisi, FR-12 (dedup) ile FR-13 (geriye dönük Alert) arasındaki çatışmanın çözüleceği yer.
