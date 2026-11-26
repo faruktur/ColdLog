@@ -310,7 +310,7 @@ Dedup (D-05) olmasaydı: 10 dakikalık bir ihlal, 5 saniyede bir Alert → ihlal
 |---|---|---|
 | B-01 | L-01 = p99 ≤ 5 sn | §1.2 — 3 dk domain bütçesi / 36× bozulma payı |
 | B-02 | Kural modeli **eşik + sürekli süre** ile sınırlı | §2.4 — state 25 MB vs 2,9 GB (pencere kuralı) |
-| B-03 | Late-data path, hot path'ten **ayrı consumer** | §2.5 — (a) modelinde geriye dönük hesap imkânsız |
+| B-03 | Late-data path, hot path'ten **ayrı consumer** | §2.5 — (a) modelinde geriye dönük hesap imkânsız. **Adım 3'te daraltıldı:** yalnızca *sıra dışı* okumalar için; *geç ama sıralı* okumaları hot path işliyor (`04-design/hld.md` §2.1). |
 | B-04 | Kafka: **48 partition**, RF 3, 7 gün retention, key `tenantId:assetId` | §2.3 |
 | B-05 | Serialization: **JSON** (slice 1) | §2.2 — 4× tasarruf hiçbir darboğazı açmıyor; en az kodla çalışan seçenek |
 | B-06 | S-05 tepe faktörü **×2**; yakalama süresi ≈ kesinti süresi | §2.8 |

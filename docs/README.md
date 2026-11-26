@@ -11,7 +11,7 @@ Klasörler peşin açılmaz, sırası gelince açılır.
 | `01-project-info/` | Proje özeti, glossary (ubiquitous language) | Başlandı |
 | `02-requirements/` | Fonksiyonel gereksinimler, sayısal NFR/SLO tablosu, out-of-scope | Yazıldı (Adım 1) |
 | `03-capacity/` | BOTE kapasite modeli, varsayımlar ve kaynakları | Yazıldı (Adım 2) |
-| `04-design/` | High-level design, zaman ve durum modeli | Adım 3 |
+| `04-design/` | High-level design, zaman ve durum modeli | Yazıldı (Adım 3) |
 | `05-adr/` | Architecture Decision Records | Sürekli |
 | `06-c4/` | C4 diyagramları (Context → Container → Component) | Adım 5 |
 | `08-validation/` | Load test planı, BOTE tahmini vs ölçülen sonuç | Adım 7 |

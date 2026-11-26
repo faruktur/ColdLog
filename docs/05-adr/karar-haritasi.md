@@ -24,6 +24,11 @@ Son iki kolon **Adım 7'de (load test)** dolacak. O an bu dosya şu cümleyi ür
 | B-08 | Headroom: tepe × 2, N+1 | A-01, A-03 | §3 | — | pod CPU kullanımı | < %50 | — |
 | B-09 | Alert deposu: PostgreSQL *(ADR yazılmadı)* | — | §2.11 | — | `fleetstream_alerts_created_total` | ~2.500/gün | — |
 | B-10 | Analytics DB: **TBD** | L-04, FR-19 | §3 | — | — | karar verecek sayı yok | — |
+| H-01 | Alert = event-time aralığı; dedup aralık çakışmasıyla | FR-12, FR-13, D-02, D-05 | §2.5 | SLI-01 | `fleetstream_alerts_created_total` | ~2.500/gün, replay'de artış yok | — |
+| H-02 | Auto-resolve yalnızca pozitif gözlemle | FR-14, FR-15 | — | — | `fleetstream_alert_ack_seconds` (MTTA) | ~3 dk (senaryo) | — |
+| H-03 | Reorder buffer yok; sıra dışı okuma hot path'te işlenmez | L-01 | §2.4 | *(SLO yok — ölçülen boşluk)* | `fleetstream_outoforder_total` | ? — Slice 1'in ilk bilinmeyeni | — |
+| H-04 | Stale tespiti `ingest_time`'a bakar, 30 sn tarama | FR-11, A-03 | §2.9 | SLI-04 | `fleetstream_stale_assets` | ~2.000/gün | — |
+| H-05 | Kural dağıtımı 10 sn poll | FR-09 | — | — | `fleetstream_rule_version` | yayılma ≤ 10 sn | — |
 | ADR-0001 | Mimari kararları ADR ile kaydetme | — (süreç kararı) | — | — | ADR'siz teknoloji kararı sayısı | 0 | — |
 | ADR-0002 | Time-series storage *(Adım 4)* | R-01, L-03 | §2.10 | SLI-03 | — | 156 milyar satır, ~3 TB | — |
 | ADR-0003 | Stream processing *(Adım 4)* | L-01, D-02, D-03 | §2.4, §2.6 | SLI-01, SLI-04 | — | ~2 core, ~25 MB state | — |

@@ -25,7 +25,7 @@ Bu listedeki terimler kodda, dokümanlarda ve diyagramlarda **aynı** şekilde k
 | **Rule** | Kullanıcı tanımlı koşul: *"ReeferContainer sıcaklığı 10 dakika boyunca 8°C üzerindeyse"*. Eşik, süre ve kapsam (hangi Asset'ler) içerir. Veri değil, konfigürasyon. |
 | **Violation** | Bir Rule'un koşulunun sağlandığının **tespiti**. Stream processing'in ürettiği olay. |
 | **Alert** | Violation'dan türeyen, kullanıcıya görünen ve yaşam döngüsü olan kayıt. Violation → Alert eşlemesi 1:1 **değildir**: aynı Asset + aynı kural için aktif Alert varken yeni Alert üretilmez (`../02-requirements/nfr-slo.md` D-05 — *flapping* bastırma). Mekanizma Adım 3'te tasarlanacak. |
-| **Alert Lifecycle** | `Raised` → `Acknowledged` → `Resolved`. ⚠️ Koşul ortadan kalkınca otomatik `Resolved` olup olmayacağı açık (FR-15); dedup mantığıyla birlikte Adım 3'te karara bağlanacak. |
+| **Alert Lifecycle** | `Raised` → `Acknowledged` → `Resolved`. `Acknowledged` manuel; `Resolved` yalnızca **pozitif gözlemle** otomatik olur — kuralın duration penceresi kadar süre eşiğin içinde kalan okumalar gelmesi (HLD H-02). Veri gelmemesi resolve değildir, o ayrı bir Violation'dır (Stale Asset). |
 | **Stale Asset** | Beklenen süre boyunca hiç Reading göndermeyen Asset. **Verinin gelmemesi de bir alarm sebebidir** — ve stream processing'de tespiti en zor olandır, çünkü tetikleyici bir event yoktur (timer gerekir). |
 
 ## Mimari
@@ -36,7 +36,7 @@ Bu listedeki terimler kodda, dokümanlarda ve diyagramlarda **aynı** şekilde k
 | **Cold Path** | Reading'lerin kalıcı depolamaya yazılıp sonradan analitik sorgulandığı, gecikmeye toleranslı yol. |
 | **Event-time** | Reading'in **cihazda ölçüldüğü** an. Kural değerlendirmesinin dayanması gereken zaman. |
 | **Processing-time** | Reading'in sunucuda **işlendiği** an. Event-time ile arasındaki fark, mobil varlıklarda şebeke kaybı nedeniyle saatlere çıkabilir. |
-| **Out-of-order** | Reading'lerin event-time sırasına göre gelmemesi. Varlık offline kalıp sonra biriken veriyi toplu göndermesi normal davranıştır, hata değildir. |
+| **Out-of-order** | **Geç gelen veri ile aynı şey değil** (HLD §2.1). *Geç ama sıralı:* event-time eski, ama o Asset için daha yenisi henüz işlenmedi — cihazın buffer'ını boşaltması; hot path normal işler, maliyeti sıfır. *Sıra dışı (out-of-order):* event-time, o Asset için **zaten işlenmiş** bir okumadan eski — retry veya cihaz saat düzeltmesi; geçmişin yeniden hesaplanmasını gerektirir. Slice 1'de ölçülür, değerlendirilmez. |
 | **Watermark** | Stream processing'in *"bu event-time'dan öncesi için tüm veri geldi sayıyorum"* dediği sınır. Geç gelen veriyle ne yapılacağını belirler. |
 | **Idempotency** | Aynı Reading'in iki kez işlenmesinin sonucu değiştirmemesi. At-least-once delivery altında zorunlu. |
 | **Back-pressure** | Downstream yetişemediğinde upstream'in yavaşlatılması veya veri atılması. Alternatifi kontrolsüz bellek büyümesi ve çökmedir. |
