@@ -13,7 +13,7 @@ Klasörler peşin açılmaz, sırası gelince açılır.
 | `03-capacity/` | BOTE kapasite modeli, varsayımlar ve kaynakları | Yazıldı (Adım 2) |
 | `04-design/` | High-level design, zaman ve durum modeli | Yazıldı (Adım 3) · **ADR-0003 sonrası revize (2026-11-27)** |
 | `05-adr/` | Architecture Decision Records | Sürekli — 0001, 0002 *(Öneri)*, 0003 *(Kabul)*, 0004 *(Kabul)* |
-| `06-c4/` | C4 diyagramları (Level 1 Context + Level 2 Container) | Adım 5 — sırada |
+| `06-c4/` | C4 diyagramları (Level 1 Context + Level 2 Container) | Yazıldı (Adım 5) |
 | `08-validation/` | Load test planı, BOTE tahmini vs ölçülen sonuç | Adım 7 |
 
 ## Çalışma kuralları
