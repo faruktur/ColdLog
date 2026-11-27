@@ -11,7 +11,7 @@ Klasörler peşin açılmaz, sırası gelince açılır.
 | `01-project-info/` | Proje özeti, glossary (ubiquitous language) | Başlandı |
 | `02-requirements/` | Fonksiyonel gereksinimler, sayısal NFR/SLO tablosu, out-of-scope | Yazıldı (Adım 1) |
 | `03-capacity/` | BOTE kapasite modeli, varsayımlar ve kaynakları | Yazıldı (Adım 2) |
-| `04-design/` | High-level design, zaman ve durum modeli | Yazıldı (Adım 3) |
+| `04-design/` | High-level design, zaman ve durum modeli | Yazıldı (Adım 3) · **ADR-0003 sonrası revize (2026-11-27)** |
 | `05-adr/` | Architecture Decision Records | Sürekli — 0001, 0002 *(Öneri)*, 0003 *(Kabul)* |
 | `06-c4/` | C4 diyagramları (Level 1 Context + Level 2 Container) | Adım 5 — sırada |
 | `08-validation/` | Load test planı, BOTE tahmini vs ölçülen sonuç | Adım 7 |

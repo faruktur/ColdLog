@@ -10,6 +10,8 @@ Son iki kolon **Adım 7'de (load test)** dolacak. O an bu dosya şu cümleyi ür
 
 **Kural:** Yeni bir ADR yazıldığında aynı mesajda bu tabloya satırı eklenir. Satırı olmayan ADR, eksik ADR'dir.
 
+**Revize edilen satır silinmez, üstü çizilmez** — neyin değiştiği ve hangi dokümana dayandığı satırın içine yazılır. (Bkz. H-04: ADR-0003, tarama tabanlı stale tespitini geçersiz kıldı.)
+
 ## Kararlar
 
 | # | Karar | Dayandığı SLO/NFR | BOTE satırı | İlgili SLI | Metrik | Tahmin | Ölçülen |
@@ -27,8 +29,10 @@ Son iki kolon **Adım 7'de (load test)** dolacak. O an bu dosya şu cümleyi ür
 | H-01 | Alert = event-time aralığı; dedup aralık çakışmasıyla | FR-12, FR-13, D-02, D-05 | §2.5 | SLI-01 | `fleetstream_alerts_created_total` | ~2.500/gün, replay'de artış yok | — |
 | H-02 | Auto-resolve yalnızca pozitif gözlemle | FR-14, FR-15 | — | — | `fleetstream_alert_ack_seconds` (MTTA) | ~3 dk (senaryo) | — |
 | H-03 | Reorder buffer yok; sıra dışı okuma hot path'te işlenmez | L-01 | §2.4 | *(SLO yok — ölçülen boşluk)* | `fleetstream_outoforder_total` | ? — Slice 1'in ilk bilinmeyeni | — |
-| H-04 | Stale tespiti `ingest_time`'a bakar, 30 sn tarama | FR-11, A-03 | §2.9 | SLI-04 | `fleetstream_stale_assets` | ~2.000/gün | — |
+| H-04 | Stale tespiti `ingest_time`'a bakar; **key başına processing-time timer** *(2026-11-27 revize: 30 sn tarama ve ayrı Stale Sweeper bileşeni kaldırıldı — `hld.md` §5.2)* | FR-11, A-03 | §2.9 | SLI-04 | `fleetstream_stale_assets`, `fleetstream_stale_suppressed_total` | ~2.000/gün; restore sonrası bastırma > 0, yanlış stale = 0 | — |
 | H-05 | Kural dağıtımı 10 sn poll | FR-09 | — | — | `fleetstream_rule_version` | yayılma ≤ 10 sn | — |
+| H-06 | State taksonomisi: Asset son-durumu **ve** kural streak'i aynı keyed state'te, motorun içinde (hot path'in Kafka dışı veri bağımlılığı yok) | FR-06, FR-07, A-03, B-02 | §2.4 | SLI-01 | `flink_state_size`, `fleetstream_rule_state_bytes` | ~25 MB; hot path'te uzak state okuması = 0 | — |
+| H-07 | Redis = türetilmiş okuma projeksiyonu, **best-effort sink** (hot path'te değil; araya topic koymak reddedildi) | A-02, A-03, L-02, FR-16 | §2.9 | SLI-03 | `fleetstream_projection_lag_seconds`, `fleetstream_projection_write_failures_total` | ~20.000 yazma/sn, lag < 1 sn; Redis kesintisinde Alert üretimi sürer | — |
 | ADR-0001 | Mimari kararları ADR ile kaydetme | — (süreç kararı) | — | — | ADR'siz teknoloji kararı sayısı | 0 | — |
 | ADR-0002 | Time-series storage: PostgreSQL + TimescaleDB *(**Öneri** — Faz 2, sinyali Adım 7'de gözlemlenemez)* | R-01, R-02, R-03, L-03 | §2.10 | SLI-03 | `insert_duration_seconds`, gerçekleşen sıkıştırma oranı | 155,5 milyar satır, ~2,1 TB (15× sıkıştırma) | — |
 | ADR-0003 | Stream processing: Flink (yönetilen state) *(**Kabul**)* | L-01, D-01, D-02, C-01 | §2.4, §2.6, §2.3 | SLI-01, SLI-04 | `flink_checkpoint_duration`, `flink_backPressuredTimeMsPerSecond`, `kafka_consumergroup_lag` | checkpoint < 5 sn; back-pressure = 0; state ~25 MB | — |

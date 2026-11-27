@@ -33,7 +33,7 @@ Hafif bir ön uç (frontend) uygulaması ise canlı varlık izleme, telemetri g�
 | Event Streaming | Apache Kafka | *(hipotez — 48 partition / RF 3 / 7 gün: B-04)* |
 | Stream / Data Processing | Apache Flink | **Karar** — [ADR-0003](../05-adr/0003-stream-processing.md) *(Kabul)* |
 | Analytics Database | TBD | **Bilinçli TBD** — FR-19 agregasyonun Asset kardinalitesini söylemiyor; karar verecek sayı yok |
-| Cache / Real-Time State | Redis | *(hipotez — kapasite kararı değil, bkz. §2.9)* |
+| Cache / Real-Time State | Redis | *(hipotez — hot path state'i **değil**; Query API'nin okuduğu projeksiyon: `hld.md` §5.3, H-07)* |
 | Container Orchestration | Kubernetes | *(hipotez)* |
 
 > **Dil notu:** ADR-0003 ile Flink geldiği için sistem artık tek dilli değil. Backend .NET; kural değerlendirme job'u JVM tarafında çalışacak (dil/arayüz seçimi Adım 6'ya bırakıldı). Bu, ADR-0003'ün *Sonuçlar* bölümünde kabul edilen bedel olarak yazılıdır.

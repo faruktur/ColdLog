@@ -297,14 +297,19 @@ Karar: **S-05 = ×2.** Bedeli açıkça kabul ediyoruz: *bir günlük kesintinin
 
 **Buradan uçtan uca bir bağlantı çıkıyor:** recovery sırasında işlenen Reading'lerin `event_time`'ı saatler öncesine ait. Bunları L-01'in ölçümüne dahil ederseniz **her kesinti SLO'yu otomatik ihlal eder ve error budget tamamen tükenir** — hâlbuki sistem tam olarak tasarlandığı gibi davranmıştır. Bu yüzden L-01'in SLI'ı geç gelen veriyi dışlamak zorundadır (bkz. `02-requirements/nfr-slo.md` §7, SLI-01). **D-03 → A-01 → S-05 → SLI-01** zinciri burada kapanıyor.
 
-### 2.9 Hot path state store (Redis)
+### 2.9 Asset state projeksiyonu (Redis)
+
+> **Revizyon 2026-11-27 (ADR-0003 + `04-design/hld.md` §5 sonrası):** Bu bölümün başlığı *"Hot path state store"* idi. Hot path state'i artık akış motorunun yönetilen keyed state'inde duruyor (§2.4'ün 25 MB'ı — iki state türünü birlikte sayan kalem); Redis **Query API'nin okuduğu türetilmiş projeksiyon** oldu. Aşağıdaki iki sayı değişmedi, **rolü** ve gerekçesi değişti — ve bir kalem eklendi: yazma yükü.
 
 ```
 100.000 Asset × ~300 B (overhead dahil) = ~30 MB
 dashboard okuma: 50 eşzamanlı dispatcher × ~100 asset/viewport × 1/sn = ~5.000 read/sn
+projeksiyon yazımı: her okuma bir key güncellemesi      = ~20.000 write/sn (~6 MB/sn)
 ```
 
-**30 MB ve 5.000 read/sn, Redis için anlamsız derecede küçük.** Yani Redis bir **kapasite kararı değil**; gerekçesi (1) durumun pod'lar arasında paylaşılması, (2) pod restart'ında kaybolmaması. ADR'de gerekçe olarak "ölçek" yazılamaz.
+**30 MB, 5.000 read/sn ve 20.000 write/sn, Redis için anlamsız derecede küçük** (tek node 100.000+ op/sn mertebesinde). Yani Redis bir **kapasite kararı değil**; gerekçesi, motorun içindeki state'in dışarıdan sorgulanabilir olmaması (`04-design/hld.md` §5.3). ADR'de gerekçe olarak "ölçek" yazılamaz.
+
+Eski gerekçeler — *(1) durumun pod'lar arasında paylaşılması, (2) pod restart'ında kaybolmaması* — artık geçerli değil: ikisini de akış motorunun checkpoint'li state'i karşılıyor. Yazma yükü yeni bir satır ama mertebe değiştirmiyor (okumanın 4×'i) ve sink best-effort olduğu için bu yazımların kaybı hot path'i durdurmuyor.
 
 ### 2.10 Cold path depolama — üç TBD'den birini kapatan sayı
 

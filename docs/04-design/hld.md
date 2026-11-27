@@ -2,7 +2,9 @@
 
 **Girdiler:** `02-requirements/functional.md`, `02-requirements/nfr-slo.md`, `03-capacity/bote-model.md`
 **Kapsam:** telemetri ingest → stream processing → asset state → kural tabanlı uyarı.
-**Bu doküman teknolojiden bağımsız olmayı hedefler**, ama BOTE üç yerde teknolojiyi zorunlu kıldı (Kafka'nın sıralı log'u, PostgreSQL'in aralık kısıtı, Redis'in paylaşılan state'i) — o yerler açıkça işaretli.
+**Bu doküman teknolojiden bağımsız olmayı hedefler**, ama BOTE üç yerde teknolojiyi zorunlu kıldı (Kafka'nın sıralı log'u, PostgreSQL'in aralık kısıtı, akış motorunun yönetilen state'i) — o yerler açıkça işaretli.
+
+> **Revizyon 2026-11-27 (ADR-0003 sonrası):** §1, §2.3, §5, §7, §8 ve §9 değişti. Sebep bir tutarsızlık değil, bir **kelime karışıklığıydı**: bu doküman "state" ile iki farklı şeyi anlatıyordu — Asset'in son bilinen durumu ve kuralın streak'i — ve ikisini iki farklı bileşene koymuştu (Redis / consumer belleği). BOTE §2.4 ise ikisini **tek kalemde** toplamıştı (25 MB). Hesap birleşik, çizim ayrıydı. ADR-0003 state'i yönetilen bir akış motoruna aldığı an ayrımın yazılması zorunlu oldu ve iki sonuç çıktı: **Redis hot path'ten çıktı** (§5.3) ve **Stale Sweeper bileşeni ortadan kalktı** (§5.2). Eski gerekçeler silinmedi, §5'te "neden değişti" olarak duruyor.
 
 ---
 
@@ -14,17 +16,15 @@ flowchart LR
     I -->|produce| K[("Kafka<br/>telemetry.readings<br/>48 partition")]
     I -.->|"geçersiz<br/>(FR-04/FR-05)"| M1[["metrik:<br/>rejected_total"]]
 
-    K --> H["Hot Path Consumer<br/>kural motoru"]
-    H --> S[("Asset State<br/>Redis")]
+    K --> H["Kural Motoru (hot path)<br/>keyed state: son-durum + kural streak<br/>stale timer (FR-11)"]
     H --> A[("Alert Store<br/>PostgreSQL")]
+    H -->|"best-effort sink"| S[("Asset State Projection<br/>Redis")]
     H -->|"sıra dışı okuma"| L[("Kafka<br/>telemetry.readings.outoforder")]
 
     L --> O["Late Path Consumer<br/>Slice 1: sadece kaydet + say"]
     O -.->|Faz 2| A
 
     R[("Rule Store<br/>PostgreSQL")] -.->|"10 sn poll<br/>FR-09"| H
-    T["Stale Sweeper<br/>FR-11"] --> S
-    T --> A
     S --> Q["Query API<br/>FR-16, FR-17"]
     A --> Q
 ```
@@ -32,10 +32,12 @@ flowchart LR
 | Bileşen | Sorumluluk | Durum (state) |
 |---|---|---|
 | **Ingest API** | Doğrula, `ingest_time` damgala, Kafka'ya yaz, **broker ack'ini aldıktan sonra** cihaza ack dön | Stateless |
-| **Hot Path Consumer** | Asset state güncelle, kuralları değerlendir, Violation → Alert | ~25 MB bellekte (BOTE §2.4a) |
+| **Kural Motoru (hot path)** | Asset son-durumunu güncelle, kuralları değerlendir, Violation → Alert, her okumada stale timer'ını yenile (FR-11) | **Yönetilen keyed state, ~25 MB** — iki tür, §5.1 |
 | **Late Path Consumer** | Sıra dışı okumaları işle | Slice 1'de yok |
-| **Stale Sweeper** | Veri gelmeyen Asset'ler için Violation üret | State'i okur |
+| **Asset State Projection** | Query API'nin okuduğu son-durum görünümü — **hot path'te değil** | Türetilmiş; kaybolursa akıştan yeniden kurulur (§5.3) |
 | **Query API** | Canlı durum + Alert listesi | Stateless |
+
+**Stale Sweeper bileşeni yok.** Önceki hâlinde vardı; son-durum state'i motorun içine girdiği an taranacak bir yer kalmadı ve iş key başına bir timer'a indi (§5.2).
 
 **Ingest ack'in anlamı (D-01):** ack, "Kafka'ya yazıldı ve `min.insync.replicas` kadar replikaya ulaştı" demektir; "işlendi" demez. Cihaz ack'i aldığında buffer'ından silebilir. Bu, dayanıklılık sınırının **Kafka'nın replikasyonu** olduğunu söylüyor — kural motorunun çökmesi veri kaybettirmez, sadece geciktirir.
 
@@ -81,7 +83,8 @@ Bu, kararın bedelini net bir cümleye indiriyor: *5 saniyelik alarm hedefini se
 ### 2.3 Sıra dışı okuma ne oluyor
 
 ```
-hot path consumer, Asset'in state'indeki last_event_time ile karşılaştırır:
+kural motoru, Asset'in keyed state'indeki last_event_time ile karşılaştırır
+(aynı key, aynı operator — event başına uzak okuma yok, bkz. §5.1):
 
   reading.event_time >  last_event_time  →  normal akış (geç olsa bile)
   reading.event_time <= last_event_time  →  SIRA DIŞI:
@@ -198,30 +201,80 @@ Raised  --operatör--> Acknowledged  --+
 
 ---
 
-## 5. Asset state ve Stale Asset
+## 5. State modeli ve Stale Asset
 
-### 5.1 State içeriği
+### 5.1 "State" tek bir şey değil — iki tür, tek yer
 
-| Alan | Kaynak | Not |
+Bu dokümanın ilk hâlindeki hata buradaydı: *state* kelimesi iki farklı şeyi anlatıyor ve ikisi iki farklı bileşene konuyordu. BOTE ise ikisini **tek kalemde** toplamıştı (§2.4: `100K × 7 × 16 B + 100K × 100 B ≈ 25 MB`).
+
+| | İçeriği | Kim yazar | Kim okur | Boyut (BOTE §2.4) |
+|---|---|---|---|---|
+| **Asset son-durum state**<br/>*(FR-06, FR-07)* | `last_event_time`, `last_ingest_time`, lat, lon, speed, temp, humidity | kural motoru, her okumada | kural motoru (sıra dışı tespiti §2.3, stale timer §5.2); Query API **projeksiyon üzerinden** (§5.3) | 100 B × 100K ≈ 10 MB |
+| **Kural değerlendirme state**<br/>*(B-02)* | kural başına `streak_start` + `fired` bayrağı | kural motoru, her okumada | yalnız kural motoru | 16 B × 7 × 100K ≈ 11 MB |
+
+**Neden ikisi aynı yerde durmak zorunda:** ikisi de `assetId` ile keyed ve ikisi de **aynı event'in işlenmesi sırasında** okunup yazılıyor.
+
+```
+sıra dışı tespiti (§2.3)  →  last_event_time'ı event'in tam ortasında ister
+kural değerlendirmesi     →  aynı anda streak_start'ı ister
+birini dışarı taşımak     →  event başına uzak okuma  →  ~20.000 uzak okuma/sn
+                          →  ve o store hot path'in sert bağımlılığı olur → A-03 ona bağlanır
+```
+
+ADR-0003 ⑤'i (*state uzak bir store'da — Redis*) tam bu gerekçeyle reddetti. Dolayısıyla "son durumu Redis'te, streak'i motorda tutmak" ⑤'in **yarısını** seçmek olurdu: bedelini (A-03'ün Redis'e bağlanması) ödeyip faydasını (processor'ın gerçekten stateless olması) almamak. İki state türünü ayırmak **kavramsal** bir ayrım; onları ayrı bileşenlere koymak **mimari** bir hata.
+
+> **Karar (H-06): her iki state türü de akış motorunun yönetilen keyed state'inde durur.** Kalıcılık, rebalance ve restore ADR-0003'ün satın aldığı mekanizmalardır. Sonuç: **hot path'in Kafka dışında hiçbir veri bağımlılığı yoktur** — Alert yazımı hariç.
+
+**Neden stale tespiti `ingest_time`'a bakıyor** (değişmedi): stale, *verinin gelmemesi* demek — bu bir processing-time olgusu. `event_time` kullanılırsa, 24 saatlik buffer'ını boşaltan bir cihaz "stale" görünmeye devam eder, çünkü işlediği veri eski. Yanlış sinyal olurdu.
+
+### 5.2 Stale Asset (FR-11) — tarama değil, key başına timer
+
+Önceki tasarım stale'i **periyodik taramayla** çözüyordu: Redis'teki 100.000 kaydı 30 saniyede bir tara, eşiği aşanlar için Violation üret. Asset başına timer tutmak *"aynı sonucu daha karmaşık şekilde üretir"* diye reddedilmişti.
+
+**O ret, timer'ı kendimiz yazdığımız dünyaya aitti.** 100.000 timer'ı elle yönetmek — kurmak, üzerine yazmak, checkpoint'lemek, rebalance'ta devretmek — gerçekten taramadan karmaşıktır. ADR-0003 ile bu mekanizma satın alındı: key başına timer, akış motorunun kalıcılaştırılmış ve checkpoint'lenen primitifidir. Üstelik son-durum state'i motorun içine girdiği için **taramanın tarayacağı yer de kalmadı.**
+
+```
+her okumada:
+  state.last_ingest_time = now
+  timer'ı (now + stale_eşiği)'ne kur     # aynı key'in önceki timer'ının üzerine yazar
+
+timer ateşlerse:
+  o Asset'ten stale_eşiği boyunca okuma gelmedi  →  Violation(Stale Asset)
+```
+
+**Timer bir processing-time timer'ıdır, event-time değil.** Bu, §5.1'deki gerekçenin birebir karşılığı. Event-time timer kullanılsaydı mekanizma **tanım gereği çalışmazdı:** veri gelmeyen bir Asset'in watermark'ı da ilerlemez, dolayısıyla timer hiç ateşlemez. Veri gelmemesini, veriyle ilerleyen bir saatle tespit edemezsin.
+
+| | Eski: 30 sn tarama | Yeni: key başına timer |
 |---|---|---|
-| `last_event_time` | okumadan | Sıra dışı tespiti (§2.3) ve FR-07'nin monoton ilerlemesi |
-| `last_ingest_time` | ingest'ten | **Stale tespiti bu alana bakar**, `last_event_time`'a değil |
-| lat, lon, speed, temp, humidity | okumadan | FR-06 |
-| kural başına `streak_start`, `fired` | türetilmiş | BOTE §2.4(a), 16 B |
+| Ek bileşen | Stale Sweeper (ayrı deployable) | yok — kural motorunun içinde |
+| Okuduğu yer | Redis (100.000 key, 30 sn'de bir) | kendi keyed state'i |
+| Gecikme | eşik + 0–30 sn | eşik + timer çözünürlüğü |
+| Ek state | yok | key başına bir timestamp (~100K × 10'lar B — mertebe değiştirmez) |
 
-**Neden stale tespiti `ingest_time`'a bakıyor:** stale, *verinin gelmemesi* demek — bu bir processing-time olgusu. `event_time` kullanılırsa, 24 saatlik buffer'ını boşaltan bir cihaz "stale" görünmeye devam eder, çünkü işlediği veri eski. Yanlış sinyal olurdu.
+#### Bunun ürettiği yeni failure mode: yanlış stale fırtınası
 
-### 5.2 Stale Sweeper (FR-11) — tetikleyici olayı olmayan Violation
+Processing-time timer duvar saatine bakar. Job 15 dakika ayakta değilse (deploy, çöküş, rescale), restore anında **tüm Asset'lerin timer'ı geçmişte kalmış** olur ve hepsi birden ateşler — oysa veri kaybolmadı, Kafka'da bekliyor ve backlog henüz tüketilmedi. 100.000 Asset için tek seferde 100.000 Stale Alert: hem operatör ekranı hem §2.11'in *"0,03 Alert/sn"* varsayımı çöker.
 
-```
-her 30 saniyede:
-  state'teki 100.000 kaydı tara
-  now() − last_ingest_time > stale_eşiği  →  Violation(Stale Asset)
-```
+> **Koruma: consumer lag eşiğin altına inene kadar stale üretimi bastırılır.** Lag yüksekken ateşleyen timer Violation'a çevrilmez, yalnızca `fleetstream_stale_suppressed_total` artar. Gerekçe §5.1'in gerekçesinin aynısı: lag yüksekken `last_ingest_time` *"veri gelmiyor"*u değil *"biz yetişemiyoruz"*u gösterir — sinyal o anda **yanlış şeyi ölçüyor**. Bu, tarama tabanlı tasarımda var olmayan bir bedel; timer'ın karşılığında ödeniyor ve ölçülüyor.
 
-Asset başına timer değil, periyodik tarama. 100.000 kaydı 30 saniyede bir taramak önemsiz bir iş (BOTE §2.9: 30 MB). Asset başına timer tutmak 100.000 timer demek olurdu — aynı sonucu daha karmaşık şekilde üretir.
+**Granülerliğin bedeli (değişmedi):** L-01'in 5 sn'si **ölçüm kaynaklı** alarmlar için geçerli; Stale Asset'in eşiği doğası gereği dakikalar mertebesinde olduğundan timer çözünürlüğü ihmal edilebilir. Bu, L-01'in tüm alarm tiplerini kapsamadığının yazılı kabulü.
 
-**Granülerliğin bedeli:** 30 saniyelik tarama aralığı, Stale Alert'ine 30 saniyeye kadar gecikme ekler. L-01'in 5 sn'si **ölçüm kaynaklı alarmlar için** geçerli; Stale Asset'in doğası gereği eşiği dakikalar mertebesinde olduğundan 30 sn ihmal edilebilir. Bu, L-01'in tüm alarm tiplerini kapsamadığının yazılı kabulü.
+### 5.3 Asset State Projection — Query API'nin okuma yolu
+
+Son-durum state'i motorun içinde olduğundan **Query API ona doğrudan erişemez** (FR-16, L-02 = p95 < 200 ms). Motorun kendi sorgulanabilir state arayüzüne bel bağlamak dashboard'u job'un yaşam döngüsüne bağlar — job restart'ı sorgu kesintisi olur. Çözüm: motor güncellenen son-durumu Redis'e **yazar**, Query API Redis'ten okur.
+
+> **Karar (H-07): Redis, hot path state'i değil, türetilmiş bir okuma projeksiyonudur.** İçinde kaynak veri yok; kaybolursa akıştan yeniden kurulur.
+
+**Kritik ayrıntı — sink back-pressure yaparsa Redis arka kapıdan hot path'e döner.** Akış motorunda yavaş bir sink, back-pressure zincirini yukarı taşır ve kural değerlendirmesini durdurur. O anda A-03 (%99,9) yine Redis'e bağlanmış olur: §5.1'de reddettiğimiz şeyin aynısı, bu kez dolaylı yoldan.
+
+| Seçenek | Karar |
+|---|---|
+| **(1) Best-effort sink** — asenkron yazım, hata yutulur + metrik; Query API bayat veri gösterir | **Seçildi** |
+| (2) Araya topic: motor → `asset.state` topic → projeksiyon consumer'ı → Redis | Reddedildi: tam izolasyonun fiyatı bir topic + bir deployable. Projeksiyonun SLO'su A-02 (%99,5 — en gevşek hedef) ve kaybı tazelik, veri değil. |
+
+(1)'in sonucu: **Redis kesintisi Alert üretimini durdurmaz**, yalnızca Query API'yi etkiler (A-02, L-02). §2.9'un *"Redis bir kapasite kararı değil"* sonucu böylece ayakta kalıyor — ama gerekçesi değişti: artık "pod'lar arası paylaşılan state" değil, "türetilmiş görünüm".
+
+**Ölçülmeyen boşluk olarak kalan:** projeksiyonun **tazeliğinin** SLO'su yok. L-02 sorgunun *hızını* ölçüyor, verinin *yaşını* ölçmüyor — Query API 150 ms'de 40 saniyelik bayat veri döndürebilir ve hiçbir SLO ihlal edilmez. Kapatmıyorsak en az ölçüyoruz: `fleetstream_projection_lag_seconds` (sink'in yazdığı son `ingest_time` ile `now` farkı) dashboard'da duruyor, hedefi Adım 7'de ölçülen değere göre konacak. **Ölçülmeyen bir boşluk, kabul edilmiş bir bedel değildir.**
 
 ---
 
@@ -246,9 +299,11 @@ Sistem yük altında kaldığında **hangi sırayla neyi feda edeceğimiz** şim
 |---|---|---|
 | 1 | **Cold path yazımı** (arşiv/TSDB besleme) lag'e bırakılır | Faz 2 bileşeni, SLO'su saatler mertebesinde |
 | 2 | **Sorgu API'si** rate limit'lenir (L-02/L-03 ihlal edilir) | A-02 = %99,5, en gevşek hedef; görünürlük kaybı, veri kaybı değil |
-| 3 | **Stale Sweeper** aralığı 30 sn → 5 dk'ya çıkarılır | Stale eşiği dakikalar mertebesinde, duyarsız |
+| 3 | **Asset state projeksiyonu** (Redis sink) seyrekleştirilir veya bırakılır | Türetilmiş görünüm; kaybı tazelik, veri değil. A-02 mertebesinde, hot path etkilenmez (§5.3'ün (1) seçimi) |
 | 4 | **Ingest'te back-pressure + `Retry-After`** (B-07) | Cihaz buffer'ı yükü devralır → gecikme, kayıp değil. **D-03'ün 24 saati bu adımın bütçesi.** |
 | 5 | **Hiçbir koşulda feda edilmez:** kural değerlendirmesi ve Alert yazımı | A-03 + D-01. Bu ikisi feda edilirse sistemin var olma sebebi kalmıyor. |
+
+Eski listedeki *"Stale Sweeper aralığını 30 sn → 5 dk'ya çıkar"* adımı düştü: stale artık ayrı bir bileşen değil, kural motorunun timer'ı (§5.2) — ve motor 5. maddede feda edilmeyenler arasında. Yani stale, bir degradation düğmesi olmaktan çıkıp alarm pipeline'ının korumasına girdi.
 
 4. adımın sırası önemli: **ingest'i kısmak, kural motorunu kısmaktan önce gelir.** Çünkü ingest kısıldığında veri cihazda bekler (kayıp yok); kural motoru kısıldığında ihlal kaçar (geri dönüşsüz).
 
@@ -260,6 +315,9 @@ Sistem yük altında kaldığında **hangi sırayla neyi feda edeceğimiz** şim
 |---|---|---|
 | ADR-0002 | Time-series storage | BOTE §2.10: 156 milyar satır. §2.3'teki sıra dışı veri çözümü de buna bağlı. |
 | ADR-0003 | Stream processing yaklaşımı | 25 MB state + event-time semantiği + replay. Kütüphane mi (Kafka consumer + kendi state'i), framework mü (Flink/Kafka Streams) — BOTE §2.6 "CPU problemi değil" dediği için seçim *state ve replay* ekseninde yapılacak. |
+| ADR-0004 | Event streaming / log | **Adım 4'te eklendi.** Parametreleri B-04'te sabit (48 partition, RF 3, 7 gün) ama kararın kendisi kayıtsızdı. Bu dokümanın iki temel sonucu log'un garantilerine dayanıyor: §2.1 (*geç* ile *sıra dışı* ayrımı — cihaz FIFO'su + partition içi sıralama) ve §3.3 (replay güvenliği). Kayıtsız bir bağımlılık değil, ADR'si olan bir karar olmalı. |
+
+> ADR-0002 ve ADR-0003 yazıldı; bu doküman ADR-0003 sonrası revize edildi (başlıktaki revizyon notu).
 
 **ADR yazılmayacak olanlar** (gerekçesi BOTE'de kapandı): Alert deposu PostgreSQL (§2.11), serialization JSON (B-05), Analytics DB **TBD kalıyor** (B-10).
 
@@ -271,4 +329,6 @@ Sistem yük altında kaldığında **hangi sırayla neyi feda edeceğimiz** şim
 | Çoklu kural tipi (ortalama, pencere) | Kapsam dışı — B-02 |
 | Alert bildirim kanalları (e-posta, SMS, webhook) | Faz 2 — Alert'in *üretimi* kesit içinde, *dağıtımı* değil |
 | Multi-tenant izolasyon | Kapsam dışı — C-02. `tenant_id` şemada ve partition key'de rezerve. |
+| Projeksiyon tazeliğinin SLO'su | **Yok** — ölçülüyor (`fleetstream_projection_lag_seconds`), hedefi Adım 7'de konacak (§5.3). Bilinçli boşluk. |
+| Yanlış stale fırtınası koruması için lag eşiği | Mekanizma karara bağlı (§5.2), **sayı değil** — eşik Adım 6'da ölçümle konacak. |
 | Cihaz tarafı (jitter'lı reconnect, buffer yönetimi) | Adım 7'de **telemetri simülatörü** olarak yazılacak; gerçek firmware kapsam dışı |
