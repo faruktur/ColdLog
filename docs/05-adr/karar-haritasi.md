@@ -36,6 +36,7 @@ Son iki kolon **Adım 7'de (load test)** dolacak. O an bu dosya şu cümleyi ür
 | ADR-0001 | Mimari kararları ADR ile kaydetme | — (süreç kararı) | — | — | ADR'siz teknoloji kararı sayısı | 0 | — |
 | ADR-0002 | Time-series storage: PostgreSQL + TimescaleDB *(**Öneri** — Faz 2, sinyali Adım 7'de gözlemlenemez)* | R-01, R-02, R-03, L-03 | §2.10 | SLI-03 | `insert_duration_seconds`, gerçekleşen sıkıştırma oranı | 155,5 milyar satır, ~2,1 TB (15× sıkıştırma) | — |
 | ADR-0003 | Stream processing: Flink (yönetilen state) *(**Kabul**)* | L-01, D-01, D-02, C-01 | §2.4, §2.6, §2.3 | SLI-01, SLI-04 | `flink_checkpoint_duration`, `flink_backPressuredTimeMsPerSecond`, `kafka_consumergroup_lag` | checkpoint < 5 sn; back-pressure = 0; state ~25 MB | — |
+| ADR-0004 | Event streaming: Kafka — replay edilebilir, key bazında sıralı log *(**Kabul**)*. `acks=all` + `min.insync.replicas=2` + RF 3; compaction yok; `telemetry.readings.invalid` ile FR-04 kapandı | D-01, D-02, D-03, A-01, FR-01, FR-04 | §2.3, §2.5, §2.8 | SLI-02 (dolaylı SLI-01) | `kafka_consumergroup_lag`, `kafka_under_replicated_partitions`, broker disk kullanımı, partition skew | ~7 TB disk; under-replicated = 0; lag ≈ 0; retention 7 günün altına inmez | — |
 
 ## Okunması gereken zincir
 

@@ -14,7 +14,8 @@
 flowchart LR
     D["Device<br/>(FIFO buffer, 24 saat)"] -->|HTTP POST| I["Ingest API<br/>FR-01..FR-05"]
     I -->|produce| K[("Kafka<br/>telemetry.readings<br/>48 partition")]
-    I -.->|"geçersiz<br/>(FR-04/FR-05)"| M1[["metrik:<br/>rejected_total"]]
+    I -.->|"geçersiz<br/>(FR-04/FR-05)"| V[("Kafka<br/>telemetry.readings.invalid")]
+    I -.-> M1[["metrik:<br/>rejected_total"]]
 
     K --> H["Kural Motoru (hot path)<br/>keyed state: son-durum + kural streak<br/>stale timer (FR-11)"]
     H --> A[("Alert Store<br/>PostgreSQL")]
@@ -38,6 +39,8 @@ flowchart LR
 | **Query API** | Canlı durum + Alert listesi | Stateless |
 
 **Stale Sweeper bileşeni yok.** Önceki hâlinde vardı; son-durum state'i motorun içine girdiği an taranacak bir yer kalmadı ve iş key başına bir timer'a indi (§5.2).
+
+**Reddedilen Reading'in yeri (FR-04).** Bu diyagram reddi başta yalnızca bir metrik olarak gösteriyordu; oysa FR-04 reddedilen verinin *"kaybolmamasını ve incelenebilir bir yere yazılmasını"* istiyor — metrik bir sensörün bozulduğunu sayar, hangi payload'ın neden reddedildiğini söylemez. Yer, ADR-0004 ile `telemetry.readings.invalid` topic'i olarak tanımlandı.
 
 **Ingest ack'in anlamı (D-01):** ack, "Kafka'ya yazıldı ve `min.insync.replicas` kadar replikaya ulaştı" demektir; "işlendi" demez. Cihaz ack'i aldığında buffer'ından silebilir. Bu, dayanıklılık sınırının **Kafka'nın replikasyonu** olduğunu söylüyor — kural motorunun çökmesi veri kaybettirmez, sadece geciktirir.
 

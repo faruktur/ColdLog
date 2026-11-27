@@ -12,7 +12,7 @@ Klasörler peşin açılmaz, sırası gelince açılır.
 | `02-requirements/` | Fonksiyonel gereksinimler, sayısal NFR/SLO tablosu, out-of-scope | Yazıldı (Adım 1) |
 | `03-capacity/` | BOTE kapasite modeli, varsayımlar ve kaynakları | Yazıldı (Adım 2) |
 | `04-design/` | High-level design, zaman ve durum modeli | Yazıldı (Adım 3) · **ADR-0003 sonrası revize (2026-11-27)** |
-| `05-adr/` | Architecture Decision Records | Sürekli — 0001, 0002 *(Öneri)*, 0003 *(Kabul)* |
+| `05-adr/` | Architecture Decision Records | Sürekli — 0001, 0002 *(Öneri)*, 0003 *(Kabul)*, 0004 *(Kabul)* |
 | `06-c4/` | C4 diyagramları (Level 1 Context + Level 2 Container) | Adım 5 — sırada |
 | `08-validation/` | Load test planı, BOTE tahmini vs ölçülen sonuç | Adım 7 |
 
@@ -28,7 +28,7 @@ Geri dönüşü maliyetli olan her seçim `05-adr/` altına yazılır. Şablon: 
 
 Her ADR aynı zamanda [`05-adr/karar-haritasi.md`](05-adr/karar-haritasi.md) tablosuna bir satır ekler: kararın dayandığı SLO, BOTE satırı, SLI ve metrik adı. **Satırı olmayan ADR eksik ADR'dir.** O tablonun son iki kolonu (tahmin / ölçülen) Adım 7'de dolar ve döngüyü kapatır.
 
-> **Durum alanı ciddiye alınır.** Erken uyarı sinyali gözlemlenemeyen bir karar *Kabul* olamaz, *Öneri* kalır. ADR-0002 (time-series storage) bu yüzden *Öneri*: Faz 2 bileşeni, sinyali Adım 7 load testinde ölçülemiyor. ADR-0003 (stream processing) *Kabul*: beş sinyalinin beşi de Slice 1 içinde gözlemlenebilir. İkisinin farklı olması tutarsızlık değil, kuralın çalıştığının kanıtı.
+> **Durum alanı ciddiye alınır.** Erken uyarı sinyali gözlemlenemeyen bir karar *Kabul* olamaz, *Öneri* kalır. ADR-0002 (time-series storage) bu yüzden *Öneri*: Faz 2 bileşeni, sinyali Adım 7 load testinde ölçülemiyor. ADR-0003 (stream processing) ve ADR-0004 (event streaming) *Kabul*: beş sinyalinin beşi de Slice 1 içinde gözlemlenebilir. Farklı olmaları tutarsızlık değil, kuralın çalıştığının kanıtı.
 
 **3. Her sayının kaynağı yazılır.**
 Dokümanda geçen hiçbir sayı kaynaksız duramaz. Kaynak türü üç tanedir ve açıkça belirtilir:
