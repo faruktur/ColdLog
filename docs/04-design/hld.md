@@ -126,6 +126,10 @@ yeni Violation, event_time = T:
 
 Üç davranış da aynı tek kuraldan çıkıyor; özel durum yok.
 
+**Komşuluk toleransı = kuralın duration penceresi** (referans senaryoda 2 dk). Keyfi bir sayı değil, kural modelinden türüyor: iki ihlal arasındaki boşluk duration penceresinden kısaysa kural anlamlı şekilde **sıfırlanamamış** demektir (`streak` yeniden kurulup tetiklenecek kadar zaman geçmemiştir). O boşluk ayrı bir excursion değil, aynı excursion'ın içindeki gürültüdür.
+
+Sonucu: tolerans kural başına tanımlı, global bir sabit değil. Duration penceresi 10 dk olan bir kural 10 dk'lık boşlukları yutar; 30 sn'lik bir kural yutmaz. Bu, `fleetstream_alerts_created_total` metriğinin kural bazında yorumlanması gerektiği anlamına geliyor.
+
 ### 3.3 Bunu doğru yapan üçüncü özellik: replay güvenliği
 
 Kritik sonuç şu: aralık modeli, **aynı okumanın tekrar işlenmesini kendiliğinden idempotent yapar.**

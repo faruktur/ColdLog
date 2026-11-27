@@ -150,6 +150,35 @@ else:
 
 (b′) satırı dürüstlük payı: (b) 2,9 GB olmak zorunda değil — kovalayarak 134 MB'a indirilebilir, karşılığında pencerenin kenarı 60 sn hassasiyete düşer. Yani (b) **imkânsız değil, pahalı ve daha karmaşık.**
 
+#### Hangi kaldıraç state'i patlatıyor — ADR-0003'ü belirleyen tablo
+
+"25 MB küçük" cümlesi ancak hangi kaldıraçla büyüdüğü yazılırsa anlamlı. İki grup var ve mertebeleri farklı:
+
+**Ölçek kaldıraçları — lineer, mimari sınıfı değiştirmiyor:**
+
+| Senaryo | State (a) | Çarpan |
+|---|---|---|
+| Bugün (100K asset, 7 kural, 100 B son-durum) | 25 MB | — |
+| Kural 7 → 30 | 70 MB | 2,8× |
+| Son-durum alanları 100 B → 500 B | 73 MB | 2,9× |
+| Asset 100K → 1M | 254 MB | 10× |
+| **Üçü birden** (1M asset, 30 kural, 500 B) | **1,2 GB** | 46× |
+
+**Kural şekli kaldıracı — lineer değil:**
+
+| Senaryo | State | Çarpan |
+|---|---|---|
+| Bugün, (a) state'te **sonuç** duruyor | 25 MB | — |
+| **Tek bir kural** pencere ortalamasına dönerse → state'te **veri** durur | **2.880 MB** | **115×** |
+| Üstüne asset 10× | 28.800 MB | 1.150× |
+| Üstüne 500 B payload | 72.000 MB | 2.880× |
+
+Üç ölçek kaldıracı birden, agresif şekilde çekildiğinde state 46× büyüyor ve **hâlâ belleğe sığıyor** (pod başına 130–300 MB). Tek bir kuralın şeklinin değişmesi 115× yapıyor ve **bellekten çıkıyor**.
+
+> **Sonuç: state'in mimari riski ölçekte değil, kural şeklinde.** Ve kural şeklini sınırlayan şey bir domain gereksinimi değil, B-02 — yani bizim yazdığımız bir kısıt. Bu ayrım ADR-0003'ün (stream processing) dayanağıdır: framework'ün disk destekli state'i, ölçek büyümesi için değil **B-02 gevşediğinde mimari sınıf değiştirmemek için** alınıyor.
+
+Dikkat: payload'un *tel üzerindeki boyutu* (JSON ↔ Protobuf) state (a)'yı hiç etkilemiyor — `bote.py` duyarlılık tablosunda `payload ×2 → state (a) 1,00×`. Payload ancak **alan sayısı** arttığı için büyürse, o da yalnızca "son bilinen durum" kısmını, lineer olarak etkiler.
+
 #### Karar ve nedenselliğin yönü
 
 > **Dikkat: (b) ve (b′)'yi eleyen şey C-01 değil.** C-01 kural *sayısını* ve *kapsamını* söylüyor (Asset Type bazında ~5-10 global kural), şeklini söylemiyor. Nedensellik ters yönde işledi: **BOTE state hesabını yaptı, sonuç C-01'e yeni bir kısıt olarak geri yazıldı.** Hesap olmadan C-01 bu kısıtı üretemezdi — zaten BOTE'nin varlık sebebi bu.
@@ -309,7 +338,7 @@ Dedup (D-05) olmasaydı: 10 dakikalık bir ihlal, 5 saniyede bir Alert → ihlal
 | # | Karar | Dayanak |
 |---|---|---|
 | B-01 | L-01 = p99 ≤ 5 sn | §1.2 — 3 dk domain bütçesi / 36× bozulma payı |
-| B-02 | Kural modeli **eşik + sürekli süre** ile sınırlı | §2.4 — state 25 MB vs 2,9 GB (pencere kuralı) |
+| B-02 | Kural modeli **eşik + sürekli süre** ile sınırlı | §2.4 — state 25 MB vs 2,9 GB (pencere kuralı). **ADR-0003'te bu kısıtın gevşeyeceği varsayıldı**, state 115× sıçrama tablosu oradan okunuyor |
 | B-03 | Late-data path, hot path'ten **ayrı consumer** | §2.5 — (a) modelinde geriye dönük hesap imkânsız. **Adım 3'te daraltıldı:** yalnızca *sıra dışı* okumalar için; *geç ama sıralı* okumaları hot path işliyor (`04-design/hld.md` §2.1). |
 | B-04 | Kafka: **48 partition**, RF 3, 7 gün retention, key `tenantId:assetId` | §2.3 |
 | B-05 | Serialization: **JSON** (slice 1) | §2.2 — 4× tasarruf hiçbir darboğazı açmıyor; en az kodla çalışan seçenek |
@@ -324,7 +353,7 @@ Dedup (D-05) olmasaydı: 10 dakikalık bir ihlal, 5 saniyede bir Alert → ihlal
 | Bileşen | Adet / boyut |
 |---|---|
 | Ingest API pod | 9 × (2 vCPU, 1 GB) |
-| Stream processor | 4 instance × 2 vCPU *(hesap 1 instance'ı gerektiriyor; 4, partition paralelliği ve arıza toleransı için)* |
+| Stream processing cluster | JobManager 2 × 1 vCPU (HA) + TaskManager 3 × 2 vCPU ≈ 8 vCPU *(hesap 1 core'un altını gerektiriyor; boyut partition paralelliği ve arıza toleransından geliyor — ADR-0003)* |
 | Kafka broker | 3 × (4 vCPU, ~2,5 TB disk) |
 | Redis | 1 primary + 1 replica, 1 GB |
 | PostgreSQL | 1 primary + 1 replica (Alert, kural, Asset registry — hepsi küçük) |

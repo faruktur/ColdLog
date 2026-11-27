@@ -30,8 +30,8 @@ Son iki kolon **Adım 7'de (load test)** dolacak. O an bu dosya şu cümleyi ür
 | H-04 | Stale tespiti `ingest_time`'a bakar, 30 sn tarama | FR-11, A-03 | §2.9 | SLI-04 | `fleetstream_stale_assets` | ~2.000/gün | — |
 | H-05 | Kural dağıtımı 10 sn poll | FR-09 | — | — | `fleetstream_rule_version` | yayılma ≤ 10 sn | — |
 | ADR-0001 | Mimari kararları ADR ile kaydetme | — (süreç kararı) | — | — | ADR'siz teknoloji kararı sayısı | 0 | — |
-| ADR-0002 | Time-series storage *(Adım 4)* | R-01, L-03 | §2.10 | SLI-03 | — | 156 milyar satır, ~3 TB | — |
-| ADR-0003 | Stream processing *(Adım 4)* | L-01, D-02, D-03 | §2.4, §2.6 | SLI-01, SLI-04 | — | ~2 core, ~25 MB state | — |
+| ADR-0002 | Time-series storage: PostgreSQL + TimescaleDB *(**Öneri** — Faz 2, sinyali Adım 7'de gözlemlenemez)* | R-01, R-02, R-03, L-03 | §2.10 | SLI-03 | `insert_duration_seconds`, gerçekleşen sıkıştırma oranı | 155,5 milyar satır, ~2,1 TB (15× sıkıştırma) | — |
+| ADR-0003 | Stream processing: Flink (yönetilen state) *(**Kabul**)* | L-01, D-01, D-02, C-01 | §2.4, §2.6, §2.3 | SLI-01, SLI-04 | `flink_checkpoint_duration`, `flink_backPressuredTimeMsPerSecond`, `kafka_consumergroup_lag` | checkpoint < 5 sn; back-pressure = 0; state ~25 MB | — |
 
 ## Okunması gereken zincir
 

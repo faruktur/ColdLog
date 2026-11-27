@@ -41,3 +41,7 @@ Bu listedeki terimler kodda, dokümanlarda ve diyagramlarda **aynı** şekilde k
 | **Idempotency** | Aynı Reading'in iki kez işlenmesinin sonucu değiştirmemesi. At-least-once delivery altında zorunlu. |
 | **Back-pressure** | Downstream yetişemediğinde upstream'in yavaşlatılması veya veri atılması. Alternatifi kontrolsüz bellek büyümesi ve çökmedir. |
 | **Consumer Lag** | Kafka'da üretilen ile tüketilen offset arasındaki fark. Sistemin yetişip yetişmediğinin birincil göstergesi. |
+| **State** | Stream processor'ın event'ler arasında **hatırladığı** şey; `assetId` başına tutulur. İki cins vardır ve mertebeleri farklıdır: state'te **sonuç** saklamak `O(asset × kural)`, **ham veri** saklamak `O(asset × pencere / örnekleme)` (`../03-capacity/bote-model.md` §2.4). |
+| **Operatör** | Akış grafiğindeki tek bir işlem adımı: `filter`/`map` (state'siz), `aggregate`/`window` (state tutar), `join` (iki akışı eşler), `repartition` (veriyi yeni bir key'e göre yeniden dağıtır — **shuffle**). Slice 1'in topolojisi tek adımdır; diğerleri B-02, Shipment kapsam dışılığı ve FR-19'un Faz 2'de olması yüzünden boş (ADR-0003). |
+| **Checkpoint** | Stream processor'ın state'inin, kaldığı offset ile birlikte kalıcı depoya periyodik olarak yazılması. Çöküş sonrası buradan geri dönülür. Aralığı bir ayar düğmesidir: kısa = hızlı toparlanma + sürekli I/O. |
+| **Savepoint** | Elle alınan, sürüm geçişi ve yeniden ölçeklendirme için kullanılan kalıcı state anlık görüntüsü. Checkpoint'ten farkı: otomatik değil, kasıtlıdır ve state'i farklı sayıda instance'a yeniden dağıtabilir. |
